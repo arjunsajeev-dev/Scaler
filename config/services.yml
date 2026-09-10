@@ -1,0 +1,60 @@
+tick_interval_seconds: 5
+drain_seconds: 5
+stop_timeout_seconds: 30
+metrics_window: 5
+docker_network: scaler
+
+services:
+  demo:
+    image: scaler-demo:latest
+    min_replicas: 1
+    max_replicas: 5
+    scale_up_cpu: 80
+    scale_down_cpu: 30
+    scale_up_ticks: 3
+    scale_down_ticks: 5
+    cooldown_seconds: 30
+    container_port: 8000
+    cpu_limit: 0.5
+    memory_limit: 128m
+    traefik:
+      enabled: true
+      rule: PathPrefix(`/demo`)
+      entrypoint: web
+      strip_prefix: /demo
+
+  alpha:
+    image: scaler-alpha:latest
+    min_replicas: 1
+    max_replicas: 3
+    scale_up_cpu: 80
+    scale_down_cpu: 30
+    scale_up_ticks: 3
+    scale_down_ticks: 5
+    cooldown_seconds: 30
+    container_port: 8000
+    cpu_limit: 0.5
+    memory_limit: 128m
+    traefik:
+      enabled: true
+      rule: PathPrefix(`/alpha`)
+      entrypoint: web
+      strip_prefix: /alpha
+
+  beta:
+    image: scaler-beta:latest
+    min_replicas: 1
+    max_replicas: 3
+    scale_up_cpu: 80
+    scale_down_cpu: 30
+    scale_up_ticks: 3
+    scale_down_ticks: 5
+    cooldown_seconds: 30
+    container_port: 80
+    cpu_limit: 0.25
+    memory_limit: 64m
+    traefik:
+      enabled: true
+      rule: PathPrefix(`/beta`)
+      entrypoint: web
+      strip_prefix: /beta

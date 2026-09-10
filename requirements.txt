@@ -1,0 +1,27 @@
+# ---- API layer ----
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+websockets==17.1
+
+# ---- Docker control (sync client; wrapped with asyncio.to_thread) ----
+docker==7.2.0
+
+# ---- State store, rolling metrics, distributed locks (redis.asyncio) ----
+redis==8.1.0
+
+# ---- Config + validation ----
+pydantic==2.13.5
+pydantic-settings==2.15.0
+PyYAML==6.0.3
+python-dotenv==1.2.3
+
+# ---- Optional cron-style scaling windows; the reconcile loop itself is plain asyncio ----
+APScheduler==3.11.3
+
+# ---- Observability ----
+prometheus-client==0.26.0
+structlog==26.1.0
+
+# ---- MQTT (optional; disabled when MQTT_HOST is empty) ----
+aiomqtt==2.4.0
+zeroconf==0.148.0
