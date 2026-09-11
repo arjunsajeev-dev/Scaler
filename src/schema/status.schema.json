@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://scaler.local/schema/status.schema.json",
+  "title": "DeviceStatus",
+  "description": "MQTT retained payload on devices/{device_id}/status.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["device_id", "device-status", "services"],
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "pattern": "^scaler-hw-.+$",
+      "description": "Stable hardware identifier, e.g. scaler-hw-01."
+    },
+    "device-status": {
+      "type": "string",
+      "enum": ["online", "offline"],
+      "description": "Hyphenated key as published on the wire (not device_status)."
+    },
+    "services": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ServiceStatus" }
+    }
+  },
+  "definitions": {
+    "ServiceStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "desired_replicas",
+        "actual_replicas",
+        "healthy",
+        "avg_cpu",
+        "avg_memory_bytes",
+        "consecutive_high",
+        "consecutive_low",
+        "cooldown_remaining_seconds",
+        "replicas"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "desired_replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "actual_replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "healthy": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "avg_cpu": {
+          "type": "number",
+          "description": "Raw average CPU as published; do not assume a 0–100 scale."
+        },
+        "avg_memory_bytes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "consecutive_high": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "consecutive_low": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cooldown_remaining_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "replicas": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ReplicaStatus" }
+        }
+      }
+    },
+    "ReplicaStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "index",
+        "status",
+        "cpu_percent",
+        "memory_bytes",
+        "net_rx_bytes",
+        "net_tx_bytes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Container or replica short id."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Orchestrated name, e.g. orch-alpha-0."
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Runtime status, e.g. running."
+        },
+        "cpu_percent": {
+          "type": ["number", "null"]
+        },
+        "memory_bytes": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "net_rx_bytes": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "net_tx_bytes": {
+          "type": ["number", "null"],
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

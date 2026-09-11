@@ -1,0 +1,105 @@
+{
+  "device_id": "scaler-hw-01",
+  "device-status": "online",
+  "services": [
+    {
+      "name": "orch-alpha",
+      "desired_replicas": 3,
+      "actual_replicas": 3,
+      "healthy": 3,
+      "avg_cpu": 42.5,
+      "avg_memory_bytes": 268435456,
+      "consecutive_high": 0,
+      "consecutive_low": 2,
+      "cooldown_remaining_seconds": 0,
+      "replicas": [
+        {
+          "id": "a1b2c3d4",
+          "name": "orch-alpha-0",
+          "index": 0,
+          "status": "running",
+          "cpu_percent": 38.2,
+          "memory_bytes": 251658240,
+          "net_rx_bytes": 12884901,
+          "net_tx_bytes": 4291008
+        },
+        {
+          "id": "e5f6a7b8",
+          "name": "orch-alpha-1",
+          "index": 1,
+          "status": "running",
+          "cpu_percent": 45.1,
+          "memory_bytes": 275251200,
+          "net_rx_bytes": 15728640,
+          "net_tx_bytes": 5242880
+        },
+        {
+          "id": "c9d0e1f2",
+          "name": "orch-alpha-2",
+          "index": 2,
+          "status": "running",
+          "cpu_percent": 44.2,
+          "memory_bytes": 278396928,
+          "net_rx_bytes": 11534336,
+          "net_tx_bytes": 3932160
+        }
+      ]
+    },
+    {
+      "name": "orch-beta",
+      "desired_replicas": 2,
+      "actual_replicas": 1,
+      "healthy": 1,
+      "avg_cpu": 78.4,
+      "avg_memory_bytes": 402653184,
+      "consecutive_high": 4,
+      "consecutive_low": 0,
+      "cooldown_remaining_seconds": 18,
+      "replicas": [
+        {
+          "id": "1a2b3c4d",
+          "name": "orch-beta-0",
+          "index": 0,
+          "status": "running",
+          "cpu_percent": 78.4,
+          "memory_bytes": 402653184,
+          "net_rx_bytes": 28311552,
+          "net_tx_bytes": 9437184
+        }
+      ]
+    },
+    {
+      "name": "orch-gamma",
+      "desired_replicas": 2,
+      "actual_replicas": 2,
+      "healthy": 1,
+      "avg_cpu": 61.0,
+      "avg_memory_bytes": 314572800,
+      "consecutive_high": 1,
+      "consecutive_low": 0,
+      "cooldown_remaining_seconds": 0,
+      "replicas": [
+        {
+          "id": "9z8y7x6w",
+          "name": "orch-gamma-0",
+          "index": 0,
+          "status": "running",
+          "cpu_percent": 55.3,
+          "memory_bytes": 298844160,
+          "net_rx_bytes": 8388608,
+          "net_tx_bytes": 2097152
+        },
+        {
+          "id": "5v4u3t2s",
+          "name": "orch-gamma-1",
+          "index": 1,
+          "status": "unhealthy",
+          "cpu_percent": null,
+          "memory_bytes": null,
+          "net_rx_bytes": null,
+          "net_tx_bytes": null
+        }
+      ]
+    }
+  ]
+}
