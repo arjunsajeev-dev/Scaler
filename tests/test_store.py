@@ -36,3 +36,17 @@ async def test_rolling_window_trimmed(store: RedisStore):
     assert snapshot is not None
     assert snapshot["count"] == 5
     assert snapshot["avg_cpu"] == sum(range(2, 7)) * 10 / 5
+
+
+async def test_dynamic_policy_overlay(store: RedisStore):
+    from app.config import ServicePolicy
+
+    policy = ServicePolicy(name="gamma", image="scaler-gamma:latest")
+    await store.upsert_dynamic_policy(policy)
+    loaded = await store.get_dynamic_policies()
+    assert loaded["gamma"].image == "scaler-gamma:latest"
+    await store.set_desired("gamma", 2)
+    await store.clear_service_state("gamma")
+    await store.remove_dynamic_policy("gamma")
+    assert await store.get_dynamic_policies() == {}
+    assert await store.get_desired("gamma") is None

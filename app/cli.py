@@ -14,11 +14,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from app.config import ROOT
+from app.config import ROOT, Settings
 
 DEFAULT_API_URL = "http://127.0.0.1:8000"
-DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8000
 HEALTH_TIMEOUT_SECONDS = 15.0
 STOP_WAIT_SECONDS = 20.0
 MANAGED_LABEL_FILTER = "orchestrator.managed=true"
@@ -40,6 +38,11 @@ def _log_path() -> Path:
 
 def _api_url(ns: argparse.Namespace) -> str:
     return ns.url.rstrip("/")
+
+
+def _api_bind() -> tuple[str, int]:
+    settings = Settings()
+    return settings.api_host, settings.api_port
 
 
 def _read_pid(path: Path) -> int | None:
@@ -79,9 +82,15 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _api_get(path: str, base: str, timeout: float = 5.0) -> tuple[int, str]:
+def _api_request(
+    path: str, base: str, method: str = "GET", timeout: float = 5.0
+) -> tuple[int, str]:
     url = base.rstrip("/") + path
-    req = urllib.request.Request(url)
+    data = b"" if method in {"POST", "PUT", "PATCH"} else None
+    req = urllib.request.Request(url, data=data, method=method)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Content-Length", "0")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode(errors="replace")
@@ -92,6 +101,14 @@ def _api_get(path: str, base: str, timeout: float = 5.0) -> tuple[int, str]:
     except urllib.error.URLError as exc:
         reason = getattr(exc, "reason", exc)
         raise SystemExit(f"orchestrator not reachable at {base}: {reason}") from exc
+
+
+def _api_get(path: str, base: str, timeout: float = 5.0) -> tuple[int, str]:
+    return _api_request(path, base, method="GET", timeout=timeout)
+
+
+def _api_post(path: str, base: str, timeout: float = 60.0) -> tuple[int, str]:
+    return _api_request(path, base, method="POST", timeout=timeout)
 
 
 def _api_healthy(base: str, timeout: float = 1.0) -> bool:
@@ -149,6 +166,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
     log_path = _log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = open(log_path, "ab")  # noqa: SIM115 - kept open for the child process
+    host, port = _api_bind()
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -156,9 +174,9 @@ def cmd_start(ns: argparse.Namespace) -> int:
             "uvicorn",
             "app.main:app",
             "--host",
-            DEFAULT_HOST,
+            host,
             "--port",
-            str(DEFAULT_PORT),
+            str(port),
         ],
         cwd=str(ROOT),
         stdout=log_file,
@@ -347,6 +365,37 @@ def cmd_log(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _http_error_message(status: int, body: str) -> str:
+    text = body.strip()
+    if text:
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+        detail = payload.get("detail")
+        if isinstance(detail, str) and detail:
+            return detail
+    return f"http {status}"
+
+
+def cmd_service(ns: argparse.Namespace) -> int:
+    name = ns.name
+    action = ns.service_action
+    path = f"/services/{urllib.parse.quote(name)}/{action}"
+    status, body = _api_post(path, _api_url(ns))
+    if status == 404:
+        print(f"unknown service {name!r}", file=sys.stderr)
+        return 1
+    if status != 200:
+        print(_http_error_message(status, body), file=sys.stderr)
+        return 1
+    payload = json.loads(body) if body.strip() else {}
+    desired = payload.get("desired_replicas")
+    message = payload.get("message") or f"{action} {name}"
+    print(f"{name}: {message} (desired={desired})")
+    return 0
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="scaler",
@@ -370,6 +419,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     log_p.add_argument("name", help="container name")
     log_p.add_argument("--tail", type=int, default=200, help="number of log lines (default: 200)")
 
+    svc = sub.add_parser("service", help="start or stop one managed service")
+    svc_sub = svc.add_subparsers(dest="service_action", required=True)
+    for action, help_text in (
+        ("start", "start replicas for one service"),
+        ("stop", "stop replicas for one service"),
+    ):
+        action_p = svc_sub.add_parser(action, help=help_text)
+        action_p.add_argument("name", help="service name (e.g. demo)")
+
     return parser.parse_args(argv)
 
 
@@ -382,6 +440,7 @@ def main(argv: list[str] | None = None) -> int:
         "list": cmd_list,
         "log": cmd_log,
         "logs": cmd_log,
+        "service": cmd_service,
     }
     return commands[ns.command](ns)
 

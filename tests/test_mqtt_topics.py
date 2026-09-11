@@ -1,7 +1,7 @@
 from app.config import Settings
 from app.mqtt.client import NullMqttBridge, create_mqtt_bridge
 from app.mqtt.discovery import is_mdns_broker
-from app.mqtt.publisher import discovery_payload
+from app.mqtt.publisher import discovery_payload, offline_status_payload
 from app.mqtt.topics import cmd_topic, discovery_topic, events_topic, lwt_topic, status_topic
 
 
@@ -35,3 +35,21 @@ def test_discovery_payload_has_topics():
     assert payload["device_id"] == "scaler-hw-01"
     assert payload["topics"]["cmd"] == "devices/scaler-hw-01/cmd"
     assert payload["api"].endswith(":8000")
+
+
+def test_offline_status_payload():
+    payload = offline_status_payload("scaler-hw-01")
+    assert payload["device_id"] == "scaler-hw-01"
+    assert payload["device-status"] == "offline"
+    assert payload["services"] == []
+
+
+def test_advertise_port_defaults_to_api_port():
+    settings = Settings(mqtt_advertise_port=None, api_port=9000, api_host="0.0.0.0")
+    assert settings.advertise_port == 9000
+    assert settings.api_host == "0.0.0.0"
+
+
+def test_advertise_port_mqtt_override():
+    settings = Settings(mqtt_advertise_port=18880, api_port=8000)
+    assert settings.advertise_port == 18880

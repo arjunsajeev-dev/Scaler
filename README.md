@@ -64,7 +64,7 @@ scaler start
 scaler health
 ```
 
-`scaler start` launches uvicorn in the background (PID file under `.scaler/`). Use `scaler stop` to terminate it **and stop/remove every orchestrator-managed replica** (`orch-*`). Sidecars (Redis, Traefik, socket proxy) stay up. You can still run `uvicorn app.main:app --host 127.0.0.1 --port 8000` in the foreground if you prefer; Ctrl+C also stops managed replicas.
+`scaler start` launches uvicorn in the background (PID file under `.scaler/`), bound to `0.0.0.0:8000` so LAN MQTT discovery can reach the API. There is **no auth** — treat the LAN as trusted. Override with `API_HOST` / `API_PORT`. Use `scaler stop` to terminate it **and stop/remove every orchestrator-managed replica** (`orch-*`). Sidecars (Redis, Traefik, socket proxy) stay up. You can still run `uvicorn app.main:app --host 0.0.0.0 --port 8000` in the foreground if you prefer; Ctrl+C also stops managed replicas.
 
 On startup it reads desired state from Redis, lists containers labelled `orchestrator.managed=true`, and reconciles (creating `min_replicas` of `demo`, `alpha`, and `beta` if none exist).
 
@@ -83,11 +83,13 @@ scaler list
 ```bash
 scaler start                         # background orchestrator (PID + log under .scaler/)
 scaler stop                          # stop orchestrator AND all orch-* replicas
-scaler health                        # process (PID file) + GET /health
+scaler health                        # process (PID file) + GET /health (Redis + Docker)
 scaler list                          # all managed containers
 scaler list orch-demo-0              # details for one container
 scaler log orch-demo-0               # logs (alias: scaler logs)
 scaler log orch-demo-0 --tail 50
+scaler service stop demo             # stop one service's replicas
+scaler service start demo            # start one service's replicas
 ```
 
 Base URL defaults to `http://127.0.0.1:8000`. Override with `--url` or `SCALER_API_URL`. PID file override: `SCALER_PID_FILE`. The Docker image also ships the `scaler` console script.
@@ -135,17 +137,32 @@ Commands:
 {"action":"scale","service":"alpha","replicas":2}
 {"action":"stop"}
 {"action":"start"}
+{"action":"stop","service":"demo"}
+{"action":"start","service":"demo"}
+{"action":"add_service","service":"gamma","image":"scaler-gamma:latest"}
+{"action":"remove_service","service":"gamma"}
 ```
 
-A down broker does not stop local scaling; the client retries with backoff.
+`stop` / `start` without `service` apply to the whole host: host `stop` (MQTT or `POST /containers/stop-all`) sets `desired=0` for every service then kills replicas so the tick loop will not recreate them. Host `start` restores each stopped service to `min_replicas`. With `service`, only that workload is drained or brought back. `add_service` / `remove_service` manage extra services on this HW at runtime (YAML services in `config/services.yml` can be stopped, not deleted).
+
+MQTT events publish immediately. Retained `devices/{id}/status` is also refreshed immediately after start/stop/scale (and again after each 5s tick for CPU/metrics).
+
+A down broker does not stop local scaling; the client retries with backoff. `GET /health` returns 200 only if Redis and Docker respond; MQTT is reported as `connected` / `disconnected` / `disabled` and does not fail the probe.
 
 API:
 
 ```bash
+curl -sS http://127.0.0.1:8000/health | python3 -m json.tool
 curl -sS http://127.0.0.1:8000/status | python3 -m json.tool
 curl -sS -X POST http://127.0.0.1:8000/scale/demo \
   -H 'content-type: application/json' \
   -d '{"replicas": 3}'
+curl -sS -X POST http://127.0.0.1:8000/services \
+  -H 'content-type: application/json' \
+  -d '{"name":"gamma","image":"scaler-gamma:latest"}'
+curl -sS -X POST http://127.0.0.1:8000/services/gamma/stop
+curl -sS -X POST http://127.0.0.1:8000/services/gamma/start
+curl -sS -X DELETE http://127.0.0.1:8000/services/gamma
 ```
 
 Live events:

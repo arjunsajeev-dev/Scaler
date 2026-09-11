@@ -7,6 +7,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 
+from app.config import ServicePolicy
 from app.models import CpuSample, EngineState, MetricSample, ScalingEvent
 
 DESIRED = "desired:{service}"
@@ -15,6 +16,7 @@ SNAPSHOT = "metrics:{service}:snapshot"
 CPU_PREV = "cpu_prev:{container_id}"
 ENGINE = "engine:{service}"
 AUDIT = "audit:events"
+DYNAMIC_POLICIES = "scaler:policies"
 
 
 class RedisStore:
@@ -93,6 +95,36 @@ class RedisStore:
     async def list_audit(self, limit: int = 50) -> list[ScalingEvent]:
         raw = await self.r.lrange(AUDIT, 0, limit - 1)
         return [ScalingEvent.model_validate_json(item) for item in raw]
+
+    async def get_dynamic_policies(self) -> dict[str, ServicePolicy]:
+        raw = await self.r.get(DYNAMIC_POLICIES)
+        if not raw:
+            return {}
+        data = json.loads(raw)
+        return {
+            name: ServicePolicy.model_validate(spec)
+            for name, spec in data.items()
+        }
+
+    async def upsert_dynamic_policy(self, policy: ServicePolicy) -> None:
+        current = await self.get_dynamic_policies()
+        current[policy.name] = policy
+        payload = {name: item.model_dump() for name, item in current.items()}
+        await self.r.set(DYNAMIC_POLICIES, json.dumps(payload))
+
+    async def remove_dynamic_policy(self, name: str) -> None:
+        current = await self.get_dynamic_policies()
+        current.pop(name, None)
+        payload = {key: item.model_dump() for key, item in current.items()}
+        await self.r.set(DYNAMIC_POLICIES, json.dumps(payload))
+
+    async def clear_service_state(self, service: str) -> None:
+        await self.r.delete(
+            DESIRED.format(service=service),
+            SAMPLES.format(service=service),
+            SNAPSHOT.format(service=service),
+            ENGINE.format(service=service),
+        )
 
 
 def _avg(values: list[float]) -> float | None:

@@ -9,8 +9,16 @@ from app.mqtt.discovery import lan_ipv4
 def status_payload(device_id: str, snapshot: StatusResponse) -> dict:
     return {
         "device_id": device_id,
-        "online": True,
+        "device-status": "online",
         "services": [service.model_dump() for service in snapshot.services],
+    }
+
+
+def offline_status_payload(device_id: str) -> dict:
+    return {
+        "device_id": device_id,
+        "device-status": "offline",
+        "services": [],
     }
 
 
@@ -18,7 +26,7 @@ def discovery_payload(device_id: str, api_port: int = 8000) -> dict:
     ip = lan_ipv4()
     return {
         "device_id": device_id,
-        "online": True,
+        "device-status": "online",
         "ip": ip,
         "api": f"http://{ip}:{api_port}",
         "topics": {

@@ -112,3 +112,11 @@ def test_no_metrics_is_noop():
     decision, state = evaluate(None, 1, 1, policy, EngineState(), now=1.0)
     assert decision.direction is None
     assert "no metrics" in decision.reason
+
+
+def test_stopped_service_does_not_autoscale():
+    policy = _policy()
+    decision, _state = evaluate(90, 0, 0, policy, EngineState(), now=1.0)
+    assert decision.direction is None
+    assert decision.desired == 0
+    assert "stopped" in decision.reason

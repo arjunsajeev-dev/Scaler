@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
-from app.core.control import UnknownServiceError, apply_manual_scale, status_snapshot
+from app.core.control import (
+    FileBackedServiceError,
+    ServiceExistsError,
+    UnknownServiceError,
+    add_service,
+    apply_manual_scale,
+    remove_service,
+    start_service,
+    status_snapshot,
+    stop_managed,
+    stop_service,
+)
 from app.dockeriface.client import Replica
 from app.dockeriface.labels import LABEL_SERVICE
 from app.models import (
@@ -14,6 +25,7 @@ from app.models import (
     ScaleRequest,
     ScaleResponse,
     ScalingEvent,
+    ServiceCreateRequest,
     StatusResponse,
     StopManagedResponse,
 )
@@ -25,9 +37,37 @@ def _state(request: Request):
     return request.app.state
 
 
+async def _ping_status(ping) -> str:
+    try:
+        ok = await ping()
+    except Exception:
+        return "down"
+    return "ok" if ok else "down"
+
+
+def _mqtt_health(state) -> str:
+    mqtt = getattr(state, "mqtt", None)
+    if mqtt is None or not getattr(mqtt, "enabled", False):
+        return "disabled"
+    if getattr(mqtt, "connected", False):
+        return "connected"
+    return "disconnected"
+
+
 @router.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health(request: Request) -> JSONResponse:
+    state = _state(request)
+    redis_status = await _ping_status(state.store.ping)
+    docker_status = await _ping_status(state.docker.ping)
+    mqtt_status = _mqtt_health(state)
+    degraded = redis_status != "ok" or docker_status != "ok"
+    body = {
+        "status": "degraded" if degraded else "ok",
+        "redis": redis_status,
+        "docker": docker_status,
+        "mqtt": mqtt_status,
+    }
+    return JSONResponse(body, status_code=503 if degraded else 200)
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -40,6 +80,44 @@ async def scale(service: str, body: ScaleRequest, request: Request) -> ScaleResp
     """Idempotent: writes desired count only. Reconciler converges actual state."""
     try:
         return await apply_manual_scale(_state(request), service, body.replicas)
+    except UnknownServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/services", response_model=ScaleResponse)
+async def create_service(body: ServiceCreateRequest, request: Request) -> ScaleResponse:
+    try:
+        return await add_service(
+            _state(request), body.name, body.image, **body.policy_overrides()
+        )
+    except ServiceExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FileBackedServiceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.delete("/services/{name}", response_model=ScaleResponse)
+async def delete_service(name: str, request: Request) -> ScaleResponse:
+    try:
+        return await remove_service(_state(request), name)
+    except UnknownServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileBackedServiceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/services/{name}/start", response_model=ScaleResponse)
+async def start_named_service(name: str, request: Request) -> ScaleResponse:
+    try:
+        return await start_service(_state(request), name)
+    except UnknownServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/services/{name}/stop", response_model=ScaleResponse)
+async def stop_named_service(name: str, request: Request) -> ScaleResponse:
+    try:
+        return await stop_service(_state(request), name)
     except UnknownServiceError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -94,8 +172,8 @@ async def container_logs(
 
 @router.post("/containers/stop-all", response_model=StopManagedResponse)
 async def stop_all_containers(request: Request) -> StopManagedResponse:
-    """Stop and remove every orchestrator-managed replica. Sidecars are untouched."""
-    names = await _state(request).docker.stop_all_managed(timeout=10)
+    """Sticky host-wide stop: desired=0 for every service, then kill replicas."""
+    names = await stop_managed(_state(request))
     return StopManagedResponse(
         stopped=names,
         message=f"stopped {len(names)} managed container(s)",

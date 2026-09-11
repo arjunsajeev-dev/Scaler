@@ -72,8 +72,10 @@ class Settings(BaseSettings):
     mqtt_device_id: str = "scaler-hw-01"
     mqtt_username: str = ""
     mqtt_password: str = ""
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
     mqtt_mdns: bool = True
-    mqtt_advertise_port: int = 8000
+    mqtt_advertise_port: int | None = None
 
     def services_path(self) -> Path:
         path = self.services_config
@@ -84,6 +86,12 @@ class Settings(BaseSettings):
     @property
     def mqtt_enabled(self) -> bool:
         return bool(self.mqtt_host.strip())
+
+    @property
+    def advertise_port(self) -> int:
+        if self.mqtt_advertise_port is not None:
+            return self.mqtt_advertise_port
+        return self.api_port
 
 
 def load_services_file(path: Path) -> tuple[ServicesFile, dict[str, ServicePolicy]]:

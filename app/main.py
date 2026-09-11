@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -12,8 +13,9 @@ from redis.asyncio import Redis
 from app.api.events import EventBus
 from app.api.metrics import OrchestratorMetrics
 from app.api.routes import router
-from app.config import get_policies, get_runtime_file, get_settings
+from app.config import get_runtime_file, get_settings
 from app.core.loop import ReconcileLoop
+from app.core.policies import load_live_policies
 from app.dockeriface.client import DockerInterface
 from app.mqtt.client import create_mqtt_bridge
 from app.mqtt.discovery import MdnsAdvertiser
@@ -35,11 +37,11 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
     runtime = get_runtime_file()
-    policies = get_policies()
     network = settings.docker_network or runtime.docker_network
 
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     store = RedisStore(redis)
+    policies, registry = await load_live_policies(settings.services_path(), store)
     docker = DockerInterface(
         base_url=settings.docker_host,
         max_concurrency=settings.docker_concurrency,
@@ -71,6 +73,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.runtime = runtime
     app.state.policies = policies
+    app.state.policy_registry = registry
     app.state.store = store
     app.state.docker = docker
     app.state.events = events
@@ -84,7 +87,8 @@ async def lifespan(app: FastAPI):
     advertiser = MdnsAdvertiser(settings)
     app.state.mdns = advertiser
 
-    advertiser.start()
+    # Zeroconf sync register can block; never fail orchestrator startup on mDNS.
+    await asyncio.to_thread(advertiser.start)
     await mqtt.start()
     await loop.startup_reconcile()
     loop.start()

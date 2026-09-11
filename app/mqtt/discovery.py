@@ -92,7 +92,7 @@ class MdnsAdvertiser:
             SCALER_SERVICE,
             f"{device_id}.{SCALER_SERVICE}",
             addresses=[socket.inet_aton(ip)],
-            port=self._settings.mqtt_advertise_port,
+            port=self._settings.advertise_port,
             properties={
                 "id": device_id,
                 "proto": "mqtt",
@@ -100,14 +100,25 @@ class MdnsAdvertiser:
                 "status": f"devices/{device_id}/status",
             },
         )
-        self._zeroconf = Zeroconf()
-        self._zeroconf.register_service(self._info)
+        try:
+            self._zeroconf = Zeroconf()
+            # allow_name_change avoids stalls when a stale instance still holds the name
+            self._zeroconf.register_service(self._info, allow_name_change=True)
+        except Exception:
+            log.exception(
+                "mdns_advertise_failed",
+                service=SCALER_SERVICE,
+                name=device_id,
+                hint="orchestrator will keep running; set MQTT_MDNS=false to skip",
+            )
+            self.stop()
+            return
         log.info(
             "mdns_advertised",
             service=SCALER_SERVICE,
             name=device_id,
             ip=ip,
-            port=self._settings.mqtt_advertise_port,
+            port=self._settings.advertise_port,
         )
 
     def stop(self) -> None:

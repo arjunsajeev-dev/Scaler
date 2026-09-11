@@ -22,6 +22,11 @@ def evaluate(
     Cooldown is measured from `last_scale_at`.
     """
     state = state.model_copy()
+    if desired == 0:
+        return (
+            ScaleDecision(direction=None, desired=0, reason="service stopped"),
+            state,
+        )
     if avg_cpu is None:
         return (
             ScaleDecision(direction=None, desired=desired, reason="no metrics yet"),

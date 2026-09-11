@@ -66,7 +66,10 @@ class Reconciler:
         if desired is None:
             desired = policy.min_replicas
             await self.store.set_desired(policy.name, desired)
-        desired = max(policy.min_replicas, min(desired, policy.max_replicas))
+        elif desired == 0:
+            pass
+        else:
+            desired = max(policy.min_replicas, min(desired, policy.max_replicas))
 
         running = await self.running(policy.name)
         actual = len(running)

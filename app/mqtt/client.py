@@ -14,7 +14,7 @@ from app.core.control import status_snapshot
 from app.models import ScalingEvent
 from app.mqtt.commands import handle_raw_command
 from app.mqtt.discovery import browse_mqtt_broker, is_mdns_broker
-from app.mqtt.publisher import discovery_payload, status_payload
+from app.mqtt.publisher import discovery_payload, offline_status_payload, status_payload
 from app.mqtt.topics import cmd_topic, discovery_topic, events_topic, lwt_topic, status_topic
 
 log = structlog.get_logger(__name__)
@@ -28,6 +28,7 @@ class NullMqttBridge:
     """Used when MQTT_HOST is empty so lifespan/tick stay unchanged."""
 
     enabled = False
+    connected = False
 
     async def start(self) -> None:
         return None
@@ -54,6 +55,11 @@ class MqttBridge:
         self._task: asyncio.Task[None] | None = None
         self._event_task: asyncio.Task[None] | None = None
         self._device_id = settings.mqtt_device_id
+        self._connected = False
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
 
     async def start(self) -> None:
         self._stop.clear()
@@ -67,6 +73,12 @@ class MqttBridge:
         )
 
     async def stop(self) -> None:
+        # Give the outbox a moment to flush offline/status before tearing down.
+        if not self._out.empty():
+            try:
+                await asyncio.wait_for(self._out.join(), timeout=2.0)
+            except TimeoutError:
+                log.warning("mqtt_outbox_flush_timeout")
         self._stop.set()
         for task in (self._task, self._event_task):
             if task is None:
@@ -96,6 +108,16 @@ class MqttBridge:
 
     async def publish_offline(self) -> None:
         await self._enqueue(lwt_topic(self._device_id), _LWT_OFFLINE, retain=True)
+        await self._enqueue(
+            status_topic(self._device_id),
+            json.dumps(offline_status_payload(self._device_id)),
+            retain=True,
+        )
+        await self._enqueue(
+            discovery_topic(self._device_id),
+            json.dumps({"device_id": self._device_id, "device-status": "offline"}),
+            retain=True,
+        )
 
     async def _enqueue(self, topic: str, payload: str, retain: bool) -> None:
         try:
@@ -103,6 +125,7 @@ class MqttBridge:
         except asyncio.QueueFull:
             try:
                 self._out.get_nowait()
+                self._out.task_done()
             except asyncio.QueueEmpty:
                 pass
             try:
@@ -156,7 +179,7 @@ class MqttBridge:
                         discovery_topic(self._device_id),
                         json.dumps(
                             discovery_payload(
-                                self._device_id, self._settings.mqtt_advertise_port
+                                self._device_id, self._settings.advertise_port
                             )
                         ),
                         qos=1,
@@ -164,11 +187,17 @@ class MqttBridge:
                     )
                     await client.subscribe(cmd_topic(self._device_id))
                     log.info("mqtt_connected", host=host, port=port)
-                    await self.publish_status()
-                    await self._pump(client)
+                    self._connected = True
+                    try:
+                        await self.publish_status()
+                        await self._pump(client)
+                    finally:
+                        self._connected = False
             except asyncio.CancelledError:
+                self._connected = False
                 raise
             except Exception:
+                self._connected = False
                 log.exception("mqtt_disconnected", retry_in=backoff)
                 try:
                     await asyncio.wait_for(self._stop.wait(), timeout=backoff)
@@ -213,6 +242,7 @@ class MqttBridge:
         while True:
             topic, payload, retain = await self._out.get()
             await client.publish(topic, payload, retain=retain)
+            self._out.task_done()
 
 
 def create_mqtt_bridge(settings: Settings, app: Any, events: EventBus) -> MqttBridge | NullMqttBridge:

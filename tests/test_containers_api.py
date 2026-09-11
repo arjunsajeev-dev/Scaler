@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from fakeredis import FakeAsyncRedis
 
+from app.api.events import EventBus
 from app.api.routes import router
+from app.config import ServicePolicy
 from app.dockeriface.client import ContainerInspect, Replica
 from app.dockeriface.labels import LABEL_MANAGED, LABEL_SERVICE, MANAGED_VALUE
+from app.store.redis_store import RedisStore
 
 
 class FakeDocker:
@@ -31,10 +35,27 @@ class FakeDocker:
         return names
 
 
+class FakeMqtt:
+    def __init__(self) -> None:
+        self.status_publishes = 0
+
+    async def publish_status(self) -> None:
+        self.status_publishes += 1
+
+
 def _app(docker: FakeDocker) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     app.state.docker = docker
+    store = RedisStore(FakeAsyncRedis(decode_responses=True))
+    app.state.store = store
+    app.state.policies = {
+        "demo": ServicePolicy(name="demo", image="scaler-demo:latest"),
+        "alpha": ServicePolicy(name="alpha", image="scaler-alpha:latest"),
+        "beta": ServicePolicy(name="beta", image="scaler-beta:latest"),
+    }
+    app.state.events = EventBus()
+    app.state.mqtt = FakeMqtt()
     return TestClient(app)
 
 
@@ -127,12 +148,19 @@ def test_container_logs_bad_tail():
     assert resp.status_code == 422
 
 
-def test_stop_all_managed_containers():
+async def test_stop_all_managed_containers():
     docker = FakeDocker()
     docker.replicas = [_replica("orch-alpha-0", 0), _replica("orch-beta-0", 0)]
     client = _app(docker)
+    store = client.app.state.store
+    await store.set_desired("alpha", 2)
+    await store.set_desired("beta", 1)
     resp = client.post("/containers/stop-all")
     assert resp.status_code == 200
     body = resp.json()
     assert body["stopped"] == ["orch-alpha-0", "orch-beta-0"]
     assert docker.replicas == []
+    assert await store.get_desired("alpha") == 0
+    assert await store.get_desired("beta") == 0
+    assert await store.get_desired("demo") == 0
+    assert client.app.state.mqtt.status_publishes == 1

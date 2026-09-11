@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -68,6 +70,40 @@ class ScaleResponse(BaseModel):
     message: str
 
 
+class ServiceCreateRequest(BaseModel):
+    name: str
+    image: str
+    min_replicas: int | None = None
+    max_replicas: int | None = None
+    scale_up_cpu: float | None = None
+    scale_down_cpu: float | None = None
+    scale_up_ticks: int | None = None
+    scale_down_ticks: int | None = None
+    cooldown_seconds: float | None = None
+    container_port: int | None = None
+    cpu_limit: float | None = None
+    memory_limit: str | None = None
+    command: list[str] | None = None
+    traefik: dict[str, Any] | None = None
+
+    def policy_overrides(self) -> dict:
+        fields = (
+            "min_replicas",
+            "max_replicas",
+            "scale_up_cpu",
+            "scale_down_cpu",
+            "scale_up_ticks",
+            "scale_down_ticks",
+            "cooldown_seconds",
+            "container_port",
+            "cpu_limit",
+            "memory_limit",
+            "command",
+            "traefik",
+        )
+        return {name: getattr(self, name) for name in fields if getattr(self, name) is not None}
+
+
 class ScalingEvent(BaseModel):
     ts: float
     service: str
@@ -80,6 +116,10 @@ class ScalingEvent(BaseModel):
         "drain",
         "error",
         "info",
+        "service_start",
+        "service_stop",
+        "service_add",
+        "service_remove",
     ]
     message: str
     desired: int | None = None

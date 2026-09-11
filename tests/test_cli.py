@@ -53,6 +53,31 @@ def test_start_writes_pid(tmp_path: Path, monkeypatch):
     assert pid_file.read_text().strip() == "4242"
 
 
+def test_start_binds_lan(tmp_path: Path, monkeypatch):
+    pid_file = tmp_path / "orchestrator.pid"
+    log_file = tmp_path / "orchestrator.log"
+    monkeypatch.setenv("SCALER_PID_FILE", str(pid_file))
+    monkeypatch.setenv("SCALER_LOG_FILE", str(log_file))
+    monkeypatch.setenv("API_HOST", "0.0.0.0")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setattr(cli, "_pid_alive", lambda pid: pid == 4242)
+    monkeypatch.setattr(cli, "_api_healthy", lambda url, timeout=1.0: False)
+    monkeypatch.setattr(cli, "_wait_healthy", lambda url, timeout=cli.HEALTH_TIMEOUT_SECONDS: True)
+    seen: dict[str, object] = {}
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            seen["args"] = args
+            self.pid = 4242
+
+    monkeypatch.setattr(cli.subprocess, "Popen", FakePopen)
+    rc = cli.main(["start"])
+    assert rc == 0
+    args = seen["args"]
+    assert args[args.index("--host") + 1] == "0.0.0.0"
+    assert args[args.index("--port") + 1] == "8000"
+
+
 def test_start_refuses_if_api_already_up(tmp_path: Path, monkeypatch, capsys):
     monkeypatch.setenv("SCALER_PID_FILE", str(tmp_path / "orchestrator.pid"))
     monkeypatch.setattr(cli, "_pid_alive", lambda pid: False)
@@ -179,6 +204,45 @@ def test_log_prints_body(monkeypatch, capsys):
     rc = cli.main(["log", "orch-demo-0"])
     assert rc == 0
     assert capsys.readouterr().out == "hello from demo\n"
+
+
+def test_parse_service_start_stop():
+    stop = cli.parse_args(["service", "stop", "demo"])
+    assert stop.command == "service"
+    assert stop.service_action == "stop"
+    assert stop.name == "demo"
+    start = cli.parse_args(["service", "start", "alpha"])
+    assert start.service_action == "start"
+    assert start.name == "alpha"
+
+
+def test_service_stop_calls_api(monkeypatch, capsys):
+    seen: dict[str, str] = {}
+
+    def fake_post(path, base, timeout=60.0):
+        seen["path"] = path
+        payload = json.dumps(
+            {
+                "service": "demo",
+                "desired_replicas": 0,
+                "actual_replicas": 0,
+                "message": "service stopped; replicas draining",
+            }
+        )
+        return 200, payload
+
+    monkeypatch.setattr(cli, "_api_post", fake_post)
+    rc = cli.main(["service", "stop", "demo"])
+    assert rc == 0
+    assert seen["path"] == "/services/demo/stop"
+    assert "desired=0" in capsys.readouterr().out
+
+
+def test_service_start_unknown(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_api_post", lambda path, base, timeout=60.0: (404, "{}"))
+    rc = cli.main(["service", "start", "missing"])
+    assert rc == 1
+    assert "unknown service" in capsys.readouterr().err
 
 
 def test_health_ok(tmp_path: Path, monkeypatch, capsys):
