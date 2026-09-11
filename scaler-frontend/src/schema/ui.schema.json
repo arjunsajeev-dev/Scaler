@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "id": "device-status-dashboard",
+  "title": "Device status",
+  "payloadSchema": "./status.schema.json",
+  "composition": ["DeviceHeader", "FleetSummary", "ServiceGrid", "ReplicaTable"],
+  "derivedFields": {
+    "scale_gap": {
+      "scope": "service",
+      "expression": "desired_replicas - actual_replicas",
+      "description": "Positive when under-replicated, negative when over-replicated."
+    },
+    "health_ratio": {
+      "scope": "service",
+      "expression": "healthy / max(actual_replicas, 1)",
+      "description": "Fraction of actual replicas reported healthy."
+    },
+    "memory_mb": {
+      "scope": "service",
+      "expression": "avg_memory_bytes / 1048576",
+      "description": "Average memory converted from bytes to mebibytes."
+    },
+    "cooldown_active": {
+      "scope": "service",
+      "expression": "cooldown_remaining_seconds > 0",
+      "description": "True while a scale cooldown is still running."
+    }
+  },
+  "visualRules": [
+    {
+      "id": "device-online-badge",
+      "widget": "DeviceHeader",
+      "when": "device-status == 'online'",
+      "apply": { "badge": "success" }
+    },
+    {
+      "id": "device-offline-badge",
+      "widget": "DeviceHeader",
+      "when": "device-status == 'offline'",
+      "apply": { "badge": "danger" }
+    },
+    {
+      "id": "service-unhealthy-accent",
+      "widget": "ServiceCard",
+      "when": "healthy < actual_replicas || scale_gap != 0",
+      "apply": { "accent": "unhealthy" }
+    },
+    {
+      "id": "service-cpu-bar",
+      "widget": "ServiceCard",
+      "when": "true",
+      "apply": { "cpuBar": "avg_cpu" }
+    },
+    {
+      "id": "service-memory-label",
+      "widget": "ServiceCard",
+      "when": "true",
+      "apply": { "memoryLabel": "memory_mb" }
+    },
+    {
+      "id": "service-cooldown-chip",
+      "widget": "ServiceCard",
+      "when": "cooldown_active",
+      "apply": { "chip": "cooldown" }
+    }
+  ],
+  "widgets": [
+    {
+      "id": "device-header",
+      "type": "DeviceHeader",
+      "repeat": null,
+      "bindings": [
+        { "field": "device_id", "pointer": "/device_id", "source": "payload" },
+        { "field": "device-status", "pointer": "/device-status", "source": "payload" }
+      ]
+    },
+    {
+      "id": "fleet-summary",
+      "type": "FleetSummary",
+      "repeat": null,
+      "bindings": [
+        { "field": "service_count", "pointer": "/services", "source": "aggregate" },
+        { "field": "desired_replicas", "pointer": "/services/*/desired_replicas", "source": "aggregate" },
+        { "field": "actual_replicas", "pointer": "/services/*/actual_replicas", "source": "aggregate" },
+        { "field": "healthy", "pointer": "/services/*/healthy", "source": "aggregate" }
+      ]
+    },
+    {
+      "id": "service-card",
+      "type": "ServiceCard",
+      "repeat": "/services",
+      "bindings": [
+        { "field": "name", "pointer": "/services/{i}/name", "source": "payload" },
+        { "field": "desired_replicas", "pointer": "/services/{i}/desired_replicas", "source": "payload" },
+        { "field": "actual_replicas", "pointer": "/services/{i}/actual_replicas", "source": "payload" },
+        { "field": "healthy", "pointer": "/services/{i}/healthy", "source": "payload" },
+        { "field": "avg_cpu", "pointer": "/services/{i}/avg_cpu", "source": "payload" },
+        { "field": "avg_memory_bytes", "pointer": "/services/{i}/avg_memory_bytes", "source": "payload" },
+        { "field": "consecutive_high", "pointer": "/services/{i}/consecutive_high", "source": "payload" },
+        { "field": "consecutive_low", "pointer": "/services/{i}/consecutive_low", "source": "payload" },
+        { "field": "cooldown_remaining_seconds", "pointer": "/services/{i}/cooldown_remaining_seconds", "source": "payload" },
+        { "field": "scale_gap", "pointer": "/services/{i}", "source": "derived" },
+        { "field": "health_ratio", "pointer": "/services/{i}", "source": "derived" },
+        { "field": "memory_mb", "pointer": "/services/{i}", "source": "derived" },
+        { "field": "cooldown_active", "pointer": "/services/{i}", "source": "derived" }
+      ]
+    },
+    {
+      "id": "replica-table",
+      "type": "ReplicaTable",
+      "repeat": "/services",
+      "bindings": [
+        { "field": "service_name", "pointer": "/services/{i}/name", "source": "payload" },
+        { "field": "replicas", "pointer": "/services/{i}/replicas", "source": "payload" }
+      ]
+    }
+  ]
+}
