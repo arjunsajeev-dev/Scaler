@@ -15,7 +15,7 @@ export function ServiceGrid({
   commandsEnabled = true,
 }: ServiceGridProps) {
   return (
-    <section className="service-grid" aria-label="Services">
+    <div className="service-grid">
       {services.map((service, index) => (
         <ServiceCard
           key={service.name}
@@ -25,6 +25,6 @@ export function ServiceGrid({
           commandsEnabled={commandsEnabled}
         />
       ))}
-    </section>
+    </div>
   );
 }

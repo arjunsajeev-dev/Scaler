@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
       mqttLiveBridge({
         brokerUrl: env.MQTT_URL || undefined,
         deviceId: env.MQTT_DEVICE_ID || env.VITE_DEVICE_ID || undefined,
+        apiUrl: env.SCALER_API_URL || undefined,
       }),
     ],
     server: {

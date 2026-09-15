@@ -11,10 +11,12 @@ import type {
 export interface MqttBridgeOptions {
   brokerUrl?: string;
   deviceId?: string;
+  apiUrl?: string;
 }
 
 interface BridgeState {
   brokerConnected: boolean;
+  apiReachable: boolean;
   deviceId: string;
   discoveryTopic: string;
   discovery: DeviceDiscovery | null;
@@ -97,6 +99,7 @@ function parseCommand(value: unknown): DeviceCommand | null {
 function snapshotFrom(state: BridgeState): LiveDeviceSnapshot {
   return {
     brokerConnected: state.brokerConnected,
+    apiReachable: state.apiReachable,
     deviceId: state.deviceId,
     discoveryTopic: state.discoveryTopic,
     discovery: state.discovery,
@@ -105,6 +108,80 @@ function snapshotFrom(state: BridgeState): LiveDeviceSnapshot {
     error: state.error,
     lastUpdatedAt: state.lastUpdatedAt,
   };
+}
+
+function localDiscovery(deviceId: string, apiUrl: string): DeviceDiscovery {
+  const host = apiUrl.replace(/^https?:\/\//, "").split("/")[0] ?? "127.0.0.1:8000";
+  const ip = host.split(":")[0] || "127.0.0.1";
+  return {
+    device_id: deviceId,
+    "device-status": "online",
+    ip,
+    api: apiUrl,
+    topics: {
+      status: `devices/${deviceId}/status`,
+      events: `devices/${deviceId}/events`,
+      cmd: `devices/${deviceId}/cmd`,
+      lwt: `devices/${deviceId}/lwt`,
+    },
+  };
+}
+
+function statusFromHttp(deviceId: string, body: unknown): DeviceStatus | null {
+  if (!isRecord(body) || !Array.isArray(body.services)) return null;
+  const wrapped = {
+    device_id: deviceId,
+    "device-status": "online",
+    services: body.services,
+  };
+  return parseStatus(wrapped);
+}
+
+async function fetchOrchestratorStatus(
+  apiUrl: string,
+  deviceId: string,
+): Promise<{ status: DeviceStatus; discovery: DeviceDiscovery } | null> {
+  const response = await fetch(`${apiUrl.replace(/\/$/, "")}/status`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) return null;
+  const status = statusFromHttp(deviceId, await response.json());
+  if (!status) return null;
+  return { status, discovery: localDiscovery(deviceId, apiUrl) };
+}
+
+async function postOrchestratorCommand(
+  apiUrl: string,
+  command: DeviceCommand,
+): Promise<void> {
+  const base = apiUrl.replace(/\/$/, "");
+  let url: string;
+  let init: RequestInit = { method: "POST", headers: { Accept: "application/json" } };
+
+  if (command.action === "start" || command.action === "stop") {
+    if (!command.service) {
+      throw new Error("service is required");
+    }
+    url = `${base}/services/${encodeURIComponent(command.service)}/${command.action}`;
+  } else if (command.action === "scale") {
+    if (!command.service || command.replicas == null) {
+      throw new Error("service and replicas are required");
+    }
+    url = `${base}/scale/${encodeURIComponent(command.service)}`;
+    init = {
+      ...init,
+      headers: { ...init.headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ replicas: command.replicas }),
+    };
+  } else {
+    throw new Error("Unsupported command");
+  }
+
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `API command failed (${response.status})`);
+  }
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown) {
@@ -155,10 +232,15 @@ export function mqttLiveBridge(options: MqttBridgeOptions = {}): Plugin {
     process.env.MQTT_DEVICE_ID?.trim() ||
     process.env.VITE_DEVICE_ID?.trim() ||
     "scaler-hw-01";
+  const apiUrl =
+    options.apiUrl ||
+    process.env.SCALER_API_URL?.trim() ||
+    "http://127.0.0.1:8000";
   const discoveryTopic = `devices/${deviceId}/discovery`;
 
   const state: BridgeState = {
     brokerConnected: false,
+    apiReachable: false,
     deviceId,
     discoveryTopic,
     discovery: null,
@@ -189,22 +271,55 @@ export function mqttLiveBridge(options: MqttBridgeOptions = {}): Plugin {
     }
   };
 
-  const publishCommand = (command: DeviceCommand): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      if (!client || !state.brokerConnected) {
-        reject(new Error("MQTT broker is not connected"));
-        return;
-      }
-      const topic =
-        state.discovery?.topics.cmd ?? `devices/${state.deviceId}/cmd`;
-      client.publish(topic, JSON.stringify(command), { qos: 1, retain: false }, (err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        resolve();
+  const publishCommand = async (command: DeviceCommand): Promise<void> => {
+    if (client && state.brokerConnected) {
+      await new Promise<void>((resolve, reject) => {
+        const topic =
+          state.discovery?.topics.cmd ?? `devices/${state.deviceId}/cmd`;
+        client?.publish(
+          topic,
+          JSON.stringify(command),
+          { qos: 1, retain: false },
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          },
+        );
       });
-    });
+      return;
+    }
+    await postOrchestratorCommand(apiUrl, command);
+  };
+
+  const liveSnapshot = async (): Promise<LiveDeviceSnapshot> => {
+    if (state.brokerConnected && state.status) {
+      state.apiReachable = false;
+      return snapshotFrom(state);
+    }
+
+    try {
+      const http = await fetchOrchestratorStatus(apiUrl, deviceId);
+      if (http) {
+        state.apiReachable = true;
+        if (!state.brokerConnected) {
+          state.status = http.status;
+          state.discovery = http.discovery;
+          state.lwt = "online";
+          state.error = null;
+          touch();
+        }
+        return snapshotFrom(state);
+      }
+      state.apiReachable = false;
+    } catch (err) {
+      state.apiReachable = false;
+      if (!state.brokerConnected) {
+        state.error =
+          err instanceof Error ? err.message : "Failed to reach orchestrator API";
+        touch();
+      }
+    }
+    return snapshotFrom(state);
   };
 
   const startClient = () => {
@@ -309,7 +424,13 @@ export function mqttLiveBridge(options: MqttBridgeOptions = {}): Plugin {
     const url = req.url?.split("?")[0];
 
     if (req.method === "GET" && url === "/api/live") {
-      sendJson(res, 200, snapshotFrom(state));
+      void liveSnapshot()
+        .then((body) => sendJson(res, 200, body))
+        .catch((err: unknown) => {
+          const message =
+            err instanceof Error ? err.message : "Failed to build live snapshot";
+          sendJson(res, 502, { error: message });
+        });
       return;
     }
 

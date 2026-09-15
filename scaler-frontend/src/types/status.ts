@@ -37,6 +37,7 @@ export interface DeviceCommand {
 /** Aggregated view from the Vite MQTT bridge (`GET /api/live`). */
 export interface LiveDeviceSnapshot {
   brokerConnected: boolean;
+  apiReachable: boolean;
   deviceId: string;
   discoveryTopic: string;
   discovery: DeviceDiscovery | null;

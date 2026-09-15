@@ -7,7 +7,10 @@ interface ReplicaTableProps {
 
 export function ReplicaTable({ service }: ReplicaTableProps) {
   return (
-    <section className="replica-table" aria-label={`${service.name} replicas`}>
+    <section
+      className="panel replica-table"
+      aria-label={`${service.name} replicas`}
+    >
       <div className="replica-table__head">
         <h2>Replicas · {service.name}</h2>
         <p>{service.replicas.length} containers</p>
